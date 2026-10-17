@@ -16,6 +16,7 @@
   7. Twist the last corners
 - **Algorithm playback**: play, pause, step forward and back, three speeds, and click any move to jump to it
 - **Practice mode**: scramble, solve with on-screen keys or the keyboard, undo, timer, move counter and solve detection
+- **Auto solve**: solves the cube from any position with the same seven steps, playing the solution move by move with each step labeled; jump to any step, pause, or stop and keep turning yourself
 - Progress tracking ("Mark as learned"), light and dark themes, and a phone-friendly layout
 
 ## Run it

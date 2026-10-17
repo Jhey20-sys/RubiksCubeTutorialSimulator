@@ -243,6 +243,30 @@ kbd, .alg-inline {
 .chip.next { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
 .chip-sep { width: 1px; height: 26px; background: var(--key-edge); margin: 0 3px; }
 .chips-empty { color: var(--muted); font-size: 13.5px; }
+.chips.long { position: relative; max-height: 134px; overflow-y: auto; align-content: flex-start; padding: 4px 4px 4px 2px; }
+.cap-stage { display: block; margin-bottom: 2px; font: 700 10.5px/1.25 var(--f-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+
+.sol-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.sol-step {
+  width: 100%;
+  display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  padding: 7px 10px 7px 7px;
+  border: 1px solid transparent; border-radius: 10px;
+  background: none; text-align: left; cursor: pointer;
+  font-size: 14px;
+}
+.sol-step:hover { background: var(--surface-2); }
+.sol-step .n {
+  width: 26px; height: 26px; display: grid; place-items: center;
+  border-radius: 7px; background: var(--surface-2); border: 1px solid var(--line);
+  font: 700 11.5px/1 var(--f-mono);
+}
+.sol-step .cnt { font: 500 12px/1 var(--f-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.sol-step.done { color: var(--muted); }
+.sol-step.done .n { background: var(--good); color: var(--good-ink); border-color: transparent; }
+.sol-step.current { background: var(--accent-soft); border-color: var(--accent); font-weight: 700; }
+.sol-step.current .n { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.key:disabled { opacity: .4; cursor: default; }
 
 .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ctl {
@@ -444,6 +468,7 @@ kbd, .alg-inline {
             <button type="button" data-speed="0.5" aria-pressed="false">0.5×</button>
             <button type="button" data-speed="1" aria-pressed="true">1×</button>
             <button type="button" data-speed="2" aria-pressed="false">2×</button>
+            <button type="button" data-speed="4" aria-pressed="false">4×</button>
           </div>
         </div>
       </div>
@@ -461,6 +486,7 @@ kbd, .alg-inline {
 /* ---------- Cube model ----------
    Yellow on top (U), white on the bottom (D), green in front (F),
    orange on the right (R), red on the left (L), blue at the back (B). */
+/*CORE_START*/
 const FACE_VEC = { R: [1, 0, 0], L: [-1, 0, 0], U: [0, 1, 0], D: [0, -1, 0], F: [0, 0, 1], B: [0, 0, -1] };
 const HOME = { U: 'Y', D: 'W', F: 'G', B: 'B', R: 'O', L: 'R' };
 const HEX = { Y: '#ffd500', W: '#f2f2ec', G: '#009b48', B: '#0046ad', O: '#ff5800', R: '#c1121f' };
@@ -525,6 +551,184 @@ function centerColor(s, face) {
   const t = s.find(t => t.p[0] === n[0] && t.p[1] === n[1] && t.p[2] === n[2]);
   return t ? t.c : HOME[face];
 }
+
+/* ---------- Auto solver ----------
+   Solves with the same seven steps the lessons teach, so the solution can be followed along. */
+const FACE_MOVES = [];
+for (const f of 'UDRLFB') FACE_MOVES.push(f, f + "'", f + '2');
+const same = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+const cloneState = s => s.map(t => ({ p: t.p.slice(), n: t.n.slice(), c: t.c }));
+const applyAll = (s, toks) => { for (const t of toks) logicApply(s, t); return s; };
+const UP = [0, 1, 0], DOWN = [0, -1, 0];
+const POS = {
+  dEdges: [[0, -1, 1], [1, -1, 0], [0, -1, -1], [-1, -1, 0]],     // DF DR DB DL
+  dCorners: [[1, -1, 1], [1, -1, -1], [-1, -1, -1], [-1, -1, 1]], // DFR DRB DBL DLF
+  mEdges: [[1, 0, 1], [1, 0, -1], [-1, 0, -1], [-1, 0, 1]],       // FR RB BL LF
+  uEdges: [[0, 1, 1], [1, 1, 0], [0, 1, -1], [-1, 1, 0]],
+  uCorners: [[1, 1, 1], [1, 1, -1], [-1, 1, -1], [-1, 1, 1]],
+};
+const solvedAt = (s, p) => s.every(t => !same(t.p, p) || t.c === HOME[faceOfVec(t.n)]);
+const allSolved = (s, list) => list.every(p => solvedAt(s, p));
+const colorsAt = (s, p) => s.filter(t => same(t.p, p)).map(t => t.c).sort().join('');
+const homeColors = p => colorsAt(logicSolved(), p);
+const upColor = (s, p) => s.find(t => same(t.p, p) && same(t.n, UP)).c;
+
+// Re-label an algorithm for a different front face (the cube turned with y).
+const FRAME = [null, { F: 'R', R: 'B', B: 'L', L: 'F' }, { F: 'B', R: 'L', B: 'F', L: 'R' }, { F: 'L', R: 'F', B: 'R', L: 'B' }];
+const inFrame = (alg, f) => tokensOf(alg).map(t => f && FRAME[f][t[0]] ? FRAME[f][t[0]] + t.slice(1) : t);
+const repeat = (toks, n) => Array.from({ length: n }, () => toks).flat();
+const U_TURNS = [['U'], ["U'"], ['U2']];
+
+function simplify(toks) {
+  const amount = t => t.endsWith('2') ? 2 : t.endsWith("'") ? 3 : 1;
+  const out = [];
+  for (const t of toks) {
+    const last = out[out.length - 1];
+    if (last && last[0] === t[0]) {
+      out.pop();
+      const q = (amount(last) + amount(t)) % 4;
+      if (q) out.push(t[0] + ['', '', '2', "'"][q]);
+    } else out.push(t);
+  }
+  return out;
+}
+
+// Shortest macro sequence (iterative deepening) that reaches the goal.
+function macroSearch(s, macros, goal, maxDepth) {
+  if (goal(s)) return [];
+  const dfs = (st, d) => {
+    for (const m of macros) {
+      const n = applyAll(cloneState(st), m);
+      if (d === 1) { if (goal(n)) return m.slice(); }
+      else { const r = dfs(n, d - 1); if (r) return m.concat(r); }
+    }
+    return null;
+  };
+  for (let d = 1; d <= maxDepth; d++) { const r = dfs(s, d); if (r) return r; }
+  return null;
+}
+
+// White cross: exact distance table over the four white edges, so the cross comes out optimal.
+let crossTable = null;
+const CROSS_COLORS = ['G', 'O', 'B', 'R'];
+function buildCrossTable() {
+  const slots = [];
+  for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) {
+    const p = [x, y, z];
+    if (p.filter(v => v).length !== 2) continue;
+    for (let a = 0; a < 3; a++) if (p[a]) { const n = [0, 0, 0]; n[a] = p[a]; slots.push({ p, n }); }
+  }
+  const idx = (p, n) => slots.findIndex(e => same(e.p, p) && same(e.n, n));
+  const T = FACE_MOVES.map(tok => {
+    const m = parseMove(tok);
+    return Int8Array.from(slots, e => m.layers.includes(e.p[AX[m.axis]])
+      ? idx(rotVec(e.p, m.axis, m.q), rotVec(e.n, m.axis, m.q)) : idx(e.p, e.n));
+  });
+  const dist = new Uint8Array(24 ** 4).fill(255);
+  const enc = (a, b, c, d) => ((a * 24 + b) * 24 + c) * 24 + d;
+  const start = enc(...POS.dEdges.map(p => idx(p, DOWN)));
+  const queue = new Int32Array(24 ** 4);
+  let head = 0, tail = 0;
+  dist[start] = 0; queue[tail++] = start;
+  while (head < tail) {
+    const cur = queue[head++];
+    const a = (cur / 13824) | 0, b = ((cur / 576) | 0) % 24, c = ((cur / 24) | 0) % 24, d = cur % 24;
+    for (const t of T) {
+      const nx = enc(t[a], t[b], t[c], t[d]);
+      if (dist[nx] === 255) { dist[nx] = dist[cur] + 1; queue[tail++] = nx; }
+    }
+  }
+  return { T, dist, idx, enc };
+}
+function solveCross(s) {
+  if (!crossTable) crossTable = buildCrossTable();
+  const { T, dist, idx, enc } = crossTable;
+  let st = CROSS_COLORS.map(col => {
+    const w = s.find(t => t.c === 'W' && t.p.filter(v => v).length === 2 &&
+      s.some(o => same(o.p, t.p) && o.c === col));
+    return idx(w.p, w.n);
+  });
+  const out = [];
+  while (dist[enc(...st)] > 0) {
+    const d = dist[enc(...st)];
+    for (let m = 0; m < 18; m++) {
+      const nx = st.map(v => T[m][v]);
+      if (dist[enc(...nx)] === d - 1) { out.push(FACE_MOVES[m]); st = nx; break; }
+    }
+  }
+  return out;
+}
+
+const ALG = {
+  trigger: "R U R' U'",
+  right: "U R U' R' U' F' U F",
+  left: "U' L' U L U F U' F'",
+  yCross: "F R U R' U' F'",
+  yEdges: "R U R' U R U2 R' U",
+  corners: "U R U' L' U R' U' L",
+  twist: "R' D' R D",
+};
+
+function solveCube(start) {
+  const s = cloneState(start);
+  const stages = [];
+  const run = (name, toks) => {
+    toks = simplify(toks);
+    applyAll(s, toks);
+    if (toks.length) stages.push({ name, moves: toks });
+  };
+
+  // Hold the cube in the lesson grip: yellow on top, green in front.
+  let grip = [];
+  outer: for (const a of [[], ['x'], ["x'"], ['x2'], ['z'], ["z'"]]) for (const b of [[], ['y'], ["y'"], ['y2']]) {
+    const t = applyAll(cloneState(s), a.concat(b));
+    if (centerColor(t, 'U') === 'Y' && centerColor(t, 'F') === 'G') { grip = a.concat(b); break outer; }
+  }
+  run('Hold the cube', grip);
+
+  run('White cross', solveCross(s));
+
+  let done = POS.dEdges.slice(), moves = [];
+  for (let j = 0; j < 4; j++) {
+    const target = POS.dCorners[j], keep = done.concat([target]);
+    const trig = f => inFrame(ALG.trigger, f);
+    const macros = [...U_TURNS, ...[0, 1, 2, 3].map(trig), repeat(trig(j), 3), repeat(trig(j), 5)];
+    const r = macroSearch(s, macros, st => allSolved(st, keep), 3);
+    applyAll(s, r); moves.push(...r); done = keep;
+  }
+  stages.push({ name: 'White corners', moves: simplify(moves) });
+  stages[stages.length - 1].moves.length || stages.pop();
+
+  moves = [];
+  for (let j = 0; j < 4; j++) {
+    const keep = done.concat([POS.mEdges[j]]);
+    const macros = [...U_TURNS];
+    for (let f = 0; f < 4; f++) macros.push(inFrame(ALG.right, f), inFrame(ALG.left, f));
+    const r = macroSearch(s, macros, st => allSolved(st, keep), 3);
+    applyAll(s, r); moves.push(...r); done = keep;
+  }
+  stages.push({ name: 'Middle layer', moves: simplify(moves) });
+  stages[stages.length - 1].moves.length || stages.pop();
+
+  const f4 = alg => [0, 1, 2, 3].map(f => inFrame(alg, f));
+  run('Yellow cross', macroSearch(s, f4(ALG.yCross), st => POS.uEdges.every(p => upColor(st, p) === 'Y'), 3));
+  run('Yellow edges', macroSearch(s, [...U_TURNS, ...f4(ALG.yEdges)], st => allSolved(st, POS.uEdges), 5));
+  run('Corner spots', macroSearch(s, f4(ALG.corners), st => POS.uCorners.every(p => colorsAt(st, p) === homeColors(p)), 3));
+
+  // Twist corners: R' D' R D at the front-right corner until yellow is up, then U to the next one.
+  const tw = [], c = cloneState(s), twist = tokensOf(ALG.twist);
+  const allUp = () => POS.uCorners.every(p => upColor(c, p) === 'Y');
+  for (let k = 0; k < 4 && !allUp(); k++) {
+    for (let n = 0; n < 6 && upColor(c, POS.uCorners[0]) !== 'Y'; n++) { applyAll(c, twist); tw.push(...twist); }
+    if (allUp()) break;
+    applyAll(c, ['U']); tw.push('U');
+  }
+  const fix = [[], ['U'], ['U2'], ["U'"]].find(u => isSolved(applyAll(cloneState(c), u)));
+  run('Twist corners', tw.concat(fix || []));
+
+  return { stages, solved: isSolved(s) };
+}
+/*CORE_END*/
 
 /* Top-down diagram of the last layer: the U face plus the top row of each side. */
 function topThumb(state, style) {
@@ -664,8 +868,9 @@ const LESSONS = [
     kicker: 'Put it together', title: 'Practice solve',
     view: { theta: 32, phi: 28 },
     goal: 'Scramble the cube and solve it here, one step at a time.',
-    body: `<p>Turn faces with the keys below or your keyboard: <kbd>U</kbd> <kbd>D</kbd> <kbd>R</kbd> <kbd>L</kbd> <kbd>F</kbd> <kbd>B</kbd> turn clockwise, hold <kbd>Shift</kbd> for counter-clockwise, and <kbd>Y</kbd> turns the whole cube. Drag the cube to see the hidden sides.</p>`,
-    tip: `Stuck? Jump to the step you're on, replay the case that matches your cube, then come back. Your cube and clock wait here.`,
+    body: `<p>Turn faces with the keys below or your keyboard: <kbd>U</kbd> <kbd>D</kbd> <kbd>R</kbd> <kbd>L</kbd> <kbd>F</kbd> <kbd>B</kbd> turn clockwise, hold <kbd>Shift</kbd> for counter-clockwise, and <kbd>Y</kbd> turns the whole cube. Drag the cube to see the hidden sides.</p>
+      <p>Stuck for good? <b>Auto solve</b> finishes the cube from wherever you are, using the same seven steps, and shows which step each move belongs to.</p>`,
+    tip: `Before reaching for Auto solve, jump to the step you're on and replay the case that matches your cube. Your cube and clock wait here.`,
   },
 ];
 /*LESSONS_END*/
@@ -860,8 +1065,10 @@ const moveMs = tok => (tok.endsWith('2') ? 1.45 : 1) * (reduceMotion ? 160 : 430
 const gapMs = () => (reduceMotion ? 60 : 150) / speed;
 
 let current = LESSONS[1];
-const P = { items: [], tokens: [], setup: [], i: 0, caseIdx: 0, playing: false };
-const PR = { history: [], seq: [], scrambled: false, scrambling: false, startAt: 0, endAt: 0, timer: null, solvedShown: false };
+const P = { items: [], tokens: [], setup: [], stageAt: [], stages: [], i: 0, caseIdx: 0, playing: false };
+const PR = { history: [], seq: [], scrambled: false, scrambling: false, solving: false, startAt: 0, endAt: 0, timer: null };
+// The playback bar drives lesson demos and auto-solve solutions.
+const usingPlayer = () => current.kind === 'lesson' || PR.solving;
 
 function describe(tok) {
   const m = parseMove(tok);
@@ -873,8 +1080,11 @@ function describe(tok) {
   const c = centerColor(L, m.base);
   return `<b>${FACE_NAME[m.base]} face</b> <span class="swatch" style="background:${HEX[c]}"></span> ${COLOR_NAME[c]} · ${dir}`;
 }
-function setCaption(tok, text) {
-  if (tok) { capMove.textContent = tok; capMove.classList.remove('idle'); capText.innerHTML = describe(tok); }
+function setCaption(tok, text, stage) {
+  if (tok) {
+    capMove.textContent = tok; capMove.classList.remove('idle');
+    capText.innerHTML = (stage ? `<span class="cap-stage">${stage}</span>` : '') + describe(tok);
+  }
   else { capMove.textContent = '·'; capMove.classList.add('idle'); capText.innerHTML = text; }
 }
 
@@ -909,15 +1119,27 @@ function renderPanel() {
   }
   if (l.kind === 'practice') {
     html += `<div class="stats"><div class="stat"><div class="v" id="pTime">0:00.0</div><div class="k">Time</div></div>
-      <div class="stat"><div class="v" id="pMoves">0</div><div class="k">Moves</div></div></div>
-      <div class="btn-row">
-        <button class="btn primary" type="button" id="pScramble">${ICON.shuffle} Scramble</button>
-        <button class="btn" type="button" id="pUndo">${ICON.undo} Undo</button>
-        <button class="btn" type="button" id="pReset">${ICON.reset} Solved cube</button>
-      </div>
-      <p class="pad-note" id="pSeq" hidden></p>`;
+      <div class="stat"><div class="v" id="pMoves">0</div><div class="k">Your moves</div></div></div>`;
+    if (PR.solving) {
+      html += `<div><p class="section-label">Auto solve · ${P.tokens.length} moves</p><ol class="sol-steps" id="solSteps">` +
+        P.stages.map((st, si) => {
+          const lesson = LESSONS.find(x => x.short === st.name);
+          return `<li><button class="sol-step" type="button" data-stage="${si}">
+            <span class="n">${lesson ? lesson.badge : '↻'}</span><span>${st.name}</span><span class="cnt">${st.moves.length}</span></button></li>`;
+        }).join('') +
+        `</ol><p class="pad-note">Tap a step to jump to it. Use the controls under the cube to pause or go move by move.</p></div>
+        <div class="btn-row"><button class="btn" type="button" id="pStopSolve">${ICON.stop} Stop auto solve</button></div>`;
+    } else {
+      html += `<div class="btn-row">
+          <button class="btn primary" type="button" id="pScramble">${ICON.shuffle} Scramble</button>
+          <button class="btn" type="button" id="pSolve">${ICON.wand} Auto solve</button>
+          <button class="btn" type="button" id="pUndo">${ICON.undo} Undo</button>
+          <button class="btn" type="button" id="pReset">${ICON.reset} Solved cube</button>
+        </div>
+        <p class="pad-note" id="pSeq" hidden></p>`;
+    }
   }
-  if (l.kind !== 'lesson') {
+  if (l.kind === 'notation' || (l.kind === 'practice' && !PR.solving)) {
     html += `<div><p class="section-label">${l.kind === 'notation' ? 'Try each move' : 'Turn a face'}</p>${padHTML()}
       <p class="pad-note">The small square shows the color of that face's center.</p></div>`;
   }
@@ -942,6 +1164,8 @@ const ICON = {
   reset: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 1 0 1.7-4"/><path d="M2.5 2.5v3.2h3.2"/></svg>',
   play: '<path d="M5 3.4v11.2a.8.8 0 0 0 1.2.7l9-5.6a.8.8 0 0 0 0-1.4l-9-5.6A.8.8 0 0 0 5 3.4Z"/>',
   pause: '<rect x="4" y="3" width="3.6" height="12" rx="1"/><rect x="10.4" y="3" width="3.6" height="12" rx="1"/>',
+  wand: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m2.5 13.5 8-8M9 4l3 3"/><path d="M12.5 1.5v2M11.5 2.5h2M14 6.5v1.6M13.2 7.3h1.6M6 1.8v1.6M5.2 2.6h1.6"/></svg>',
+  stop: '<svg viewBox="0 0 16 16" fill="currentColor"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/></svg>',
 };
 
 function padHTML() {
@@ -959,7 +1183,8 @@ function refreshPadColors() {
 
 /* Lesson playback */
 function renderChips() {
-  if (current.kind !== 'lesson') {
+  chipsEl.classList.toggle('long', usingPlayer() && P.tokens.length > 30);
+  if (!usingPlayer()) {
     const hist = current.kind === 'practice' ? PR.history : NOTE.history;
     chipsEl.innerHTML = hist.length
       ? hist.slice(-24).map((t, i, a) => `<span class="chip ${i === a.length - 1 ? 'now' : 'done'}">${t}</span>`).join('')
@@ -978,6 +1203,31 @@ function renderChips() {
   btnPrev.disabled = P.i === 0;
   btnNext.disabled = P.i >= P.tokens.length;
   btnRestart.disabled = P.i === 0;
+  if (chipsEl.classList.contains('long')) {
+    const el = chipsEl.querySelector('.chip.now') || chipsEl.querySelector('.chip.next');
+    if (el) chipsEl.scrollTop = Math.max(0, el.offsetTop - 6);
+  }
+  if (PR.solving) updateSolveProgress();
+}
+// Name of the solution step the latest move belongs to (the first step before any move).
+const stageNow = () => P.stageAt[Math.max(0, P.i - 1)];
+function updateSolveProgress() {
+  const list = $('solSteps');
+  if (list) {
+    const finished = P.i >= P.tokens.length, k = Math.max(0, P.i - 1);
+    let start = 0;
+    P.stages.forEach((st, si) => {
+      const end = start + st.moves.length;
+      const cur = !finished && k >= start && k < end;
+      const b = list.querySelector(`[data-stage="${si}"]`);
+      b.classList.toggle('current', cur);
+      b.classList.toggle('done', finished || (!cur && k >= end));
+      start = end;
+    });
+  }
+  updateStats();
+  banner.hidden = P.i < P.tokens.length;
+  if (!banner.hidden) banner.textContent = `Solved by Auto solve · ${P.tokens.length} moves`;
 }
 function setPlaying(on) {
   P.playing = on;
@@ -985,9 +1235,15 @@ function setPlaying(on) {
   $('playLabel').textContent = on ? 'Pause' : (P.i >= P.tokens.length && P.tokens.length ? 'Replay' : 'Play');
 }
 function idleCaption() {
+  if (PR.solving) {
+    if (P.i === 0) setCaption(null, `Solution ready: <b>${P.tokens.length} moves</b> across ${P.stages.length} steps. Press <b>Play</b>.`);
+    else if (P.i >= P.tokens.length) setCaption(null, `<b>Solved.</b> Press <b>Stop auto solve</b> to keep practicing.`);
+    return;
+  }
   if (P.i === 0) setCaption(null, `This is the case. Press <b>Play</b>, or step through one move at a time.`);
   else if (P.i >= P.tokens.length) setCaption(null, `<b>Case solved.</b> Replay it, or try the next case.`);
 }
+const stageLabel = k => PR.solving ? P.stageAt[k] : undefined;
 function loadCase(i) {
   P.caseIdx = i;
   const c = current.cases[i];
@@ -1006,9 +1262,9 @@ function loadCase(i) {
 }
 async function stepNext() {
   if (pending || P.i >= P.tokens.length) return;
-  const t = P.tokens[P.i++];
+  const k = P.i, t = P.tokens[P.i++];
+  setCaption(t, null, stageLabel(k));
   renderChips();
-  setCaption(t);
   await move(t, moveMs(t));
   if (!P.playing) { setPlaying(false); if (P.i >= P.tokens.length) idleCaption(); }
 }
@@ -1016,8 +1272,8 @@ async function stepPrev() {
   if (pending || P.i <= 0) return;
   setPlaying(false);
   const t = invertTok(P.tokens[--P.i]);
+  setCaption(t, null, stageLabel(P.i));
   renderChips();
-  setCaption(t);
   await move(t, moveMs(t));
   if (P.i === 0) idleCaption();
 }
@@ -1025,8 +1281,8 @@ function jump(k) {
   setPlaying(false);
   resetTo(P.setup.concat(P.tokens.slice(0, k)));
   P.i = k;
+  if (k > 0 && k < P.tokens.length) setCaption(P.tokens[k - 1], null, stageLabel(k - 1)); else idleCaption();
   renderChips();
-  if (k > 0 && k < P.tokens.length) setCaption(P.tokens[k - 1]); else idleCaption();
 }
 async function togglePlay() {
   if (P.playing) { setPlaying(false); return; }
@@ -1064,15 +1320,71 @@ function updateStats() {
   const now = PR.endAt || (PR.startAt ? performance.now() : 0);
   t.textContent = fmtTime(PR.startAt ? now - PR.startAt : 0);
   mv.textContent = PR.history.length;
-  stageTag.innerHTML = `Practice<strong>${PR.scrambled ? (PR.endAt ? 'Solved' : PR.startAt ? 'Solving…' : 'Scrambled. First move starts the clock.') : 'Press Scramble to start'}</strong>`;
+  if (PR.solving) {
+    stageTag.innerHTML = `Auto solve<strong>${P.i >= P.tokens.length ? 'Solved' : stageNow()}</strong>`;
+    return;
+  }
+  const status = !PR.scrambled ? 'Press Scramble to start'
+    : PR.assisted ? (isSolved(L) ? 'Solved with Auto solve' : 'Auto solve used, clock off')
+    : PR.endAt ? 'Solved'
+    : PR.startAt ? 'Solving…' : 'Scrambled. First move starts the clock.';
+  stageTag.innerHTML = `Practice<strong>${status}</strong>`;
 }
+
+function autoSolve() {
+  if (PR.scrambling || PR.solving || pending) return;
+  if (isSolved(L)) { setCaption(null, 'The cube is already solved. Press <b>Scramble</b> first.'); return; }
+  const { stages } = solveCube(L);
+  // An assisted round doesn't count as a timed solve, so stop the clock here.
+  clearInterval(PR.timer);
+  if (PR.startAt && !PR.endAt) PR.endAt = performance.now();
+  PR.solving = true;
+  PR.assisted = true;
+  P.stages = stages;
+  P.items = []; P.tokens = []; P.stageAt = [];
+  stages.forEach((st, si) => {
+    if (si) P.items.push('|');
+    for (const m of st.moves) { P.items.push(m); P.tokens.push(m); P.stageAt.push(st.name); }
+  });
+  P.setup = (PR.scrambled ? PR.seq : []).concat(PR.history);
+  P.i = 0;
+  resetTo(P.setup);
+  if (speed < 2) document.querySelector('.seg [data-speed="2"]').click();
+  controlsEl.hidden = false;
+  renderPanel();
+  renderChips();
+  idleCaption();
+  togglePlay();
+}
+function stopSolve(rerender = true) {
+  if (!PR.solving) return;
+  setPlaying(false);
+  PR.history = PR.history.concat(P.tokens.slice(0, P.i));
+  PR.solving = false;
+  if (!PR.endAt && PR.startAt) PR.endAt = performance.now();
+  controlsEl.hidden = true;
+  banner.hidden = true;
+  chipsEl.classList.remove('long');
+  if (!rerender) return;
+  renderPanel();
+  showScramble();
+  renderChips(); updateStats(); refreshPadColors();
+  setCaption(null, isSolved(L) ? 'Solved. Press <b>Scramble</b> for another round.' : 'Auto solve stopped. Keep turning, or press <b>Auto solve</b> again.');
+}
+function showScramble() {
+  const seqEl = $('pSeq');
+  if (!seqEl || !PR.scrambled) return;
+  seqEl.hidden = false;
+  seqEl.innerHTML = `Scramble: <span style="font-family:var(--f-mono)">${PR.seq.join(' ')}</span>`;
+}
+
 function freeMove(tok) {
-  if (current.kind === 'practice' && PR.scrambling) return;
+  if (current.kind === 'practice' && (PR.scrambling || PR.solving)) return;
   setCaption(tok);
   move(tok, (reduceMotion ? 90 : 230) * (tok.endsWith('2') ? 1.35 : 1));
   if (current.kind === 'notation') { NOTE.history.push(tok); renderChips(); refreshPadColors(); return; }
   PR.history.push(tok);
-  if (PR.scrambled && !PR.startAt && tok[0] !== 'y') {
+  if (PR.scrambled && !PR.assisted && !PR.startAt && tok[0] !== 'y') {
     PR.startAt = performance.now();
     clearInterval(PR.timer);
     PR.timer = setInterval(updateStats, 100);
@@ -1088,7 +1400,7 @@ function freeMove(tok) {
 }
 function practiceReset() {
   clearInterval(PR.timer);
-  Object.assign(PR, { history: [], scrambled: false, scrambling: false, startAt: 0, endAt: 0 });
+  Object.assign(PR, { history: [], scrambled: false, scrambling: false, solving: false, assisted: false, startAt: 0, endAt: 0 });
   banner.hidden = true;
   const seqEl = $('pSeq');
   if (seqEl) seqEl.hidden = true;
@@ -1142,8 +1454,15 @@ panel.addEventListener('click', e => {
   }
   if (t.closest('#pScramble')) return scramble();
   if (t.closest('#pReset')) return practiceReset();
+  if (t.closest('#pSolve')) return autoSolve();
+  if (t.closest('#pStopSolve')) return stopSolve();
+  const st = t.closest('[data-stage]');
+  if (st) {
+    const k = P.stages.slice(0, +st.dataset.stage).reduce((n, s) => n + s.moves.length, 0);
+    return jump(k);
+  }
   if (t.closest('#pUndo')) {
-    if (PR.scrambling || !PR.history.length || PR.endAt) return;
+    if (PR.scrambling || PR.solving || !PR.history.length) return;
     const last = PR.history.pop();
     const inv = invertTok(last);
     setCaption(inv);
@@ -1154,7 +1473,7 @@ panel.addEventListener('click', e => {
 
 document.addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (current.kind === 'lesson') {
+  if (usingPlayer()) {
     if (e.key === 'ArrowRight') { e.preventDefault(); setPlaying(false); stepNext(); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); stepPrev(); }
     else if (e.key === ' ' && !(e.target instanceof HTMLButtonElement)) { e.preventDefault(); togglePlay(); }
@@ -1167,6 +1486,7 @@ document.addEventListener('keydown', e => {
 
 function openLesson(id) {
   const l = LESSONS.find(x => x.id === id) || LESSONS[1];
+  if (PR.solving && l !== current) stopSolve(false);
   current = l;
   setPlaying(false);
   banner.hidden = true;
@@ -1192,11 +1512,9 @@ function openLesson(id) {
       // Resume the practice solve exactly where it was left.
       resetTo(PR.seq.concat(PR.history));
       if (PR.startAt && !PR.endAt) PR.timer = setInterval(updateStats, 100);
-      const seqEl = $('pSeq');
-      seqEl.hidden = false;
-      seqEl.innerHTML = `Scramble: <span style="font-family:var(--f-mono)">${PR.seq.join(' ')}</span>`;
+      showScramble();
       renderChips(); updateStats(); refreshPadColors();
-      setCaption(null, PR.endAt ? 'Solved. Scramble again for another round.' : 'Picked up where you left off.');
+      setCaption(null, isSolved(L) ? 'Solved. Press <b>Scramble</b> for another round.' : 'Picked up where you left off.');
     } else {
       practiceReset();
     }
