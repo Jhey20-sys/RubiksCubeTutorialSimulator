@@ -406,6 +406,20 @@ kbd, .alg-inline {
   .cap-move { min-width: 50px; height: 48px; font-size: 22px; }
   .cap-text { font-size: 13px; }
 }
+/* Cursor follower: the brand cube trails the pointer */
+.cursor-cube {
+  position: fixed; left: 0; top: 0; z-index: 1000;
+  width: 30px; height: 30px; margin: -15px 0 0 -15px;
+  pointer-events: none; opacity: 0;
+  transition: opacity .25s ease;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, .22));
+  will-change: transform;
+}
+.cursor-cube.is-on { opacity: 1; }
+.cursor-cube svg { display: block; width: 100%; height: 100%; }
+@media (hover: none), (pointer: coarse) {
+  .cursor-cube { display: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   .chip, .chip:hover { transition: none; transform: none; }
 }
@@ -1535,6 +1549,56 @@ window.addEventListener('hashchange', () => {
   if (id !== current.id && LESSONS.some(l => l.id === id)) openLesson(id);
 });
 requestAnimationFrame(frame);
+})();
+</script>
+<script>
+/* Cursor follower: a copy of the brand cube eases after the mouse, leans into its motion,
+   grows over things you can click and squishes on press. */
+(() => {
+  if (!matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const el = document.createElement('div');
+  el.className = 'cursor-cube';
+  el.setAttribute('aria-hidden', 'true');
+  el.appendChild(document.querySelector('.brand svg').cloneNode(true));
+  document.body.appendChild(el);
+
+  const OFFSET = 22;              // sit below-right of the pointer so it never covers the click target
+  const target = { x: innerWidth / 2, y: innerHeight / 2 };
+  const pos = { ...target };
+  let scale = 1, tilt = 0, hot = false, down = false, last = 0, raf = 0;
+
+  const tick = now => {
+    const dt = Math.min(64, now - (last || now)) / 16.67; last = now;
+    const k = reduce ? 1 : 1 - Math.pow(1 - 0.2, dt);
+    const px = pos.x, py = pos.y;
+    pos.x += (target.x - pos.x) * k;
+    pos.y += (target.y - pos.y) * k;
+    const vx = (pos.x - px) / (dt || 1);
+    const goalTilt = reduce ? 0 : Math.max(-28, Math.min(28, vx * 1.6));
+    tilt += (goalTilt - tilt) * (1 - Math.pow(1 - 0.18, dt));
+    const goalScale = down ? 0.78 : hot ? 1.4 : 1;
+    scale += (goalScale - scale) * (1 - Math.pow(1 - 0.22, dt));
+    el.style.transform = `translate3d(${pos.x}px, ${pos.y}px, 0) rotate(${tilt}deg) scale(${scale})`;
+    const settled = Math.abs(target.x - pos.x) < 0.1 && Math.abs(target.y - pos.y) < 0.1
+      && Math.abs(goalTilt - tilt) < 0.1 && Math.abs(goalScale - scale) < 0.005;
+    raf = settled ? 0 : requestAnimationFrame(tick);
+  };
+  const wake = () => { if (!raf) { last = 0; raf = requestAnimationFrame(tick); } };
+
+  let shown = false;
+  addEventListener('pointermove', e => {
+    if (e.pointerType === 'touch') return;
+    target.x = e.clientX + OFFSET; target.y = e.clientY + OFFSET;
+    if (!shown) { pos.x = target.x; pos.y = target.y; shown = true; }
+    hot = !!e.target.closest('button, a, [role="button"], input, select, label, canvas');
+    el.classList.add('is-on');
+    wake();
+  }, { passive: true });
+  addEventListener('pointerdown', e => { if (e.pointerType !== 'touch') { down = true; wake(); } });
+  addEventListener('pointerup', () => { down = false; wake(); });
+  document.documentElement.addEventListener('pointerleave', () => { el.classList.remove('is-on'); shown = false; });
+  addEventListener('blur', () => el.classList.remove('is-on'));
 })();
 </script>
 </body>
